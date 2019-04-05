@@ -222,6 +222,6 @@ defmodule ElasticClient.HTTP do
   defp index(index_name), do: "#{config()[:index_prefix]}#{index_name}"
 
   defp config() do
-    Application.get_env(:hbsi, :es)
+    Application.get_env(:elasticsearch_client)
   end
 end
