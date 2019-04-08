@@ -5,7 +5,7 @@ A small wrapper for RESTful communication with an ES server. Provides indexing a
 
 # Configuration
 ```
-config :elasticsearch_client,
+config :elastic_client, :server,
   host: "localhost",
   port: 9200
 ```
