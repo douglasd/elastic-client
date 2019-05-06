@@ -1,23 +1,37 @@
 defmodule ElasticClient.HTTP do
+  @moduledoc """
+  Provides a simple api to make calls to an ElasticSearch server over HTTP.
+  
+  """
   alias HTTPoison, as: Http
   require Logger
 
-  def index_exists(index_name) do
+  @doc """
+  Checks if the provided index name exists on the server and returns a boolean result.
+  """
+  @spec index_exists?(String.t()) :: boolean()
+  def index_exists?(index_name) when is_binary(index_name)do
     case http_head(index_url(index_name)) do
       {:ok, 200, _} -> true
       _ -> false
     end
   end
 
-  def mapping_exists(index_name, mapping_name) do
+  @doc """
+  Checks if the provided mapping name exists on the index name and returns a boolean result.
+  """
+  @spec mapping_exists?(String.t(), String.t()) :: boolean()
+  def mapping_exists?(index_name, mapping_name) do
     case http_head("#{index_url(index_name)}/_mapping/#{mapping_name}") do
       {:ok, 200, _} -> true
       _ -> false
     end
   end
 
+  @spec add_index(String.t()) :: {atom}
   def add_index(index_name), do: add_index(index_name, "")
 
+  @spec add_index(String.t(), String.t()) :: {atom(), any()}
   def add_index(index_name, mapping) do
     case http_put(index_url(index_name), mapping) do
       {:ok, 200, body} ->
@@ -30,24 +44,42 @@ defmodule ElasticClient.HTTP do
         {:error, reason}
     end
   end
-
+  
+  @type bulk_option :: {:id, String.t()} | {:index_name, String.t()} | {:doc_type, String.t()}
+  @spec bulk_action(
+    atom(),
+    String.t(),
+    [bulk_option]
+  ) :: [any()]
+  @doc """
+  builds an es bulk action pair to index a document
+  params:
+  doc - the jsoninfied document to index
+  options:
+  index_name - the index name to send address the bulk action to
+  doc_type - the document type to adress the document to
+  id - if this is a reindex of an existing document, put the es _id in this key
+  """
   def bulk_action(:index, doc, opts) do
-    base = %{
-      index: %{
-        _index: index(opts[:index_name]),
-        _type: opts[:doc_type]
-      }
-    }
-
-    case opts[:id] do
-      nil ->
-        [base, doc]
-
-      new_id ->
-        [Map.put(base, :_id, new_id), doc]
-    end
+    base =
+      case opts[:id] do
+        nil ->
+          %{index: %{_index: index(opts[:index_name]),_type: opts[:doc_type]}}
+        new_id ->
+          %{index: %{_id: new_id, _index: index(opts[:index_name]),_type: opts[:doc_type]}}
+      end
+    [base, doc]
   end
 
+  @doc """
+  builds an es bulk action pair to update a document
+  params:
+  doc = jsonified document to save as the udpate
+  options:
+  index_name - the index name to send address the bulk action to
+  doc_type - the document type to adress the document to
+  id - the es _id for the document being updated
+  """
   def bulk_action(:update, doc, opts) do
     base = %{
       update: %{
@@ -60,6 +92,33 @@ defmodule ElasticClient.HTTP do
     [base, %{doc: doc}]
   end
 
+  @doc """
+  builds an es bulk action to delete a document
+  params:
+  id - the es _id for the document being updated
+  options:
+  index_name - the index name to send address the bulk action to
+  doc_type - the document type to adress the document to
+  """
+  def bulk_action(:delete, id, opts) do
+    base =
+      %{
+        delete: %{
+          _index: index(opts[:index_name]),
+          _type: opts[:doc_type],
+          _id: id
+        }
+      }
+    [base]
+  end
+
+  @doc """
+  adds a mapping definition to an index
+  params:
+  label - the label to use for the mapping, will be the type
+  mapping - the mapping definition itself
+  """
+  @spec add_mapping(String.t(), String.t(), map()) :: {:ok, any()} | {:error, any()}
   def add_mapping(index_name, label, mapping) do
     url = "#{index_url(index_name)}/_mapping/#{label}"
 
@@ -75,6 +134,15 @@ defmodule ElasticClient.HTTP do
     end
   end
 
+  @doc """
+  index a new document under the given index name as the given type
+  params:
+  index_name - the name of the index to index the document under
+  document - the jsonified document to index
+  type - the type to use when indexing the document, there
+  should already be a mapping in place on the given index name for this type
+  """
+  @spec index_document(String.t(), String.t(), String.t()) :: {:ok, any()} | {:error, any()}
   def index_document(index_name, document, type) do
     case http_post(url_for(index_name, type), document) do
       {:ok, 200, body} ->
@@ -88,6 +156,15 @@ defmodule ElasticClient.HTTP do
     end
   end
 
+  @doc """
+  perform a GET search on the given index name and type using the urlencoded query.
+  returns results of a call to search_results which is a map
+  params:
+  index_name - the index name to run the search query on
+  type - the type to run the search on
+  query - a map with key/value search params
+  """
+  @spec search(atom(), String.t(), String.t(), map()) :: map()
   def search(:get, index_name, type, query) when is_binary(type) and is_map(query) do
     url = url_for(index_name, type) <> "/_search?" <> URI.encode_query(query)
 
@@ -103,6 +180,14 @@ defmodule ElasticClient.HTTP do
     end
   end
 
+  @doc """
+  perform a POST search on the given index name and passing the query map as a
+  json encoded POST payload.
+  params:
+  index_name - the index name to run the search query on
+  type - the type to run the search on
+  query - a map with key/value search params
+  """
   def search(:post, index_name, type, query) when is_binary(type) do
     url = url_for(index_name, type) <> "/_search"
 
@@ -152,6 +237,20 @@ defmodule ElasticClient.HTTP do
     result = Http.post(url, actions, headers)
 
     case parse_http_response(result) do
+      {:ok, 200, body} -> {:ok, Jason.decode!(body)}
+      {:ok, sc} -> {:error, sc}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def delete_by_query(index_name, type, q, refresh \\ true) do
+    tail =
+      case refresh do
+        true -> "refresh"
+        _ -> ""
+      end
+    url = "#{url_for(index_name, type)}/_delete_by_query?#{tail}"
+    case http_post(url, q |> Jason.encode!()) do
       {:ok, 200, body} -> {:ok, Jason.decode!(body)}
       {:ok, sc} -> {:error, sc}
       {:error, reason} -> {:error, reason}
