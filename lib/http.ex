@@ -310,7 +310,7 @@ defmodule ElasticClient.HTTP do
         _ ->
           [base]
       end
-    do_alias_actions(alias_actions) |> IO.inspect()
+    do_alias_actions(alias_actions)
   end
 
   def fetch_alias_indices(alias_name) do
