@@ -43,15 +43,15 @@ defmodule ElasticClient.QueryBuilder do
   
   
     ## aggregations pipeline
-    def terms_aggregation(aggs, label, field, missing, child_aggs \\ nil) do
-      single_field_aggregation(aggs, :terms, label, field, missing, child_aggs)
+    def terms_aggregation(aggs, label, terms, child_aggs \\ nil) do
+      single_field_aggregation(aggs, :terms, label, terms, child_aggs)
     end
-    def cardinality_aggregation(aggs, label, field, missing, child_aggs \\ nil) do
-      single_field_aggregation(aggs, :cardinality, label, field, missing, child_aggs)
+    def cardinality_aggregation(aggs, label, terms, child_aggs \\ nil) do
+      single_field_aggregation(aggs, :cardinality, label, terms, child_aggs)
     end
   
-    def single_field_aggregation(aggs, type, label, field, missing, child_aggs \\ nil) do
-      base = Map.put(%{}, type, %{field: field, missing: missing})
+    def single_field_aggregation(aggs, type, label, terms, child_aggs \\ nil) do
+      base = Map.put(%{}, type, terms)
       agg =
         case child_aggs do
           nil -> base

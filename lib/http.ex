@@ -6,6 +6,8 @@ defmodule ElasticClient.HTTP do
   alias HTTPoison, as: Http
   require Logger
 
+  @recv_timeout 60000
+
   @doc """
   Checks if the provided index name exists on the server and returns a boolean result.
   """
@@ -112,6 +114,18 @@ defmodule ElasticClient.HTTP do
     [base]
   end
 
+  def alias_action(type, opts) when type in [:add_alias, :remove_alias] do
+    base = 
+      %{
+        index: opts[:index_name],
+        alias: opts[:alias_name],
+      }
+    case type do
+      :add_alias -> Map.put(%{}, :add, base)
+      :remove_alias -> Map.put(%{}, :remove, base)
+    end
+  end
+
   @doc """
   adds a mapping definition to an index
   params:
@@ -216,6 +230,7 @@ defmodule ElasticClient.HTTP do
     end
   end
 
+  # calls to _bulk api
   def do_bulk_actions(actions, refresh \\ true)
 
   def do_bulk_actions(actions, refresh) when is_list(actions) do
@@ -234,9 +249,26 @@ defmodule ElasticClient.HTTP do
         _ -> "#{host_url()}/_bulk"
       end
 
-    result = Http.post(url, actions, headers)
+    result = http_post(url, actions, headers)
 
-    case parse_http_response(result) do
+    case result do
+      {:ok, 200, body} -> {:ok, Jason.decode!(body)}
+      {:ok, sc} -> {:error, sc}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # calls to _alias api
+  def do_alias_actions(actions) when is_list(actions) do
+    Jason.encode!(%{actions: actions})
+    |> do_alias_actions()
+  end
+
+  def do_alias_actions(actions) when is_binary(actions) do
+    headers = [{"content-type", "application/x-ndjson"}]
+    url ="#{host_url()}/_aliases"
+    result = http_post(url, actions, headers)
+    case result do
       {:ok, 200, body} -> {:ok, Jason.decode!(body)}
       {:ok, sc} -> {:error, sc}
       {:error, reason} -> {:error, reason}
@@ -257,6 +289,44 @@ defmodule ElasticClient.HTTP do
     end
   end
 
+  def alias(alias_name, index_name, re_alias) do
+    base = alias_action(:add_alias, index_name: index_name, alias_name: alias_name)
+    alias_actions =
+      case re_alias do
+        true ->
+          case fetch_alias_indices(alias_name) do
+            [] ->
+              [base]
+            existing ->
+              expanded =
+                Enum.map(existing, fn existing_aliased ->
+                  alias_action(
+                    :remove_alias,
+                    index_name: existing_aliased,
+                    alias_name: alias_name
+                  )
+                end)
+                [base | expanded]
+                |> Enum.reverse()
+          end
+        _ ->
+          [base]
+      end
+    do_alias_actions(alias_actions)
+  end
+
+  def fetch_alias_indices(alias_name) do
+    url = "#{host_url()}/*/_alias/#{alias_name}"
+    case http_get(url) do
+      {:ok, 200, body} ->
+        Jason.decode!(body)
+        |> Enum.map(&(elem(&1, 0)))
+      _ ->
+        []
+        
+    end
+  end
+
   def hits(%{"hits" => hits}), do: hits
 
   def source(%{"_source" => source}), do: source
@@ -271,7 +341,11 @@ defmodule ElasticClient.HTTP do
   def url_for(index_name, type, id), do: "#{url_for(index_name, type)}/#{id}"
 
   defp http_get(url), do: Http.get(url, headers()) |> parse_http_response()
-  defp http_post(url, req), do: Http.post(url, req, headers()) |> parse_http_response()
+  defp http_post(url, req), do: http_post(url, req, headers())
+  defp http_post(url, req, headers) do
+    Http.post(url, req, headers, [recv_timeout: @recv_timeout]) 
+    |> parse_http_response()
+  end
   defp http_put(url, req), do: Http.put(url, req, headers()) |> parse_http_response()
   defp http_head(url), do: Http.head(url, headers()) |> parse_http_response()
   defp http_delete(url), do: Http.delete(url, headers()) |> parse_http_response()
@@ -301,18 +375,6 @@ defmodule ElasticClient.HTTP do
   defp search_results(%{"hits" => %{"total" => total, "hits" => hits}}) do
     %{meta: %{total: total}, hits: hits}
   end
-
-  # defp update_query(script, query) do
-  #   %{
-  #     conflicts: "proceed",
-  #     script: %{
-  #       source: script,
-  #       lang: "painless"
-  #     },
-  #     query: query
-  #   }
-  #   |> Jason.encode!()
-  # end
 
   defp headers(), do: [{"content-type", "application/json"}]
 
