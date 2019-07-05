@@ -6,6 +6,8 @@ defmodule ElasticClient.HTTP do
   alias HTTPoison, as: Http
   require Logger
 
+  @recv_timeout 60000
+
   @doc """
   Checks if the provided index name exists on the server and returns a boolean result.
   """
@@ -247,9 +249,9 @@ defmodule ElasticClient.HTTP do
         _ -> "#{host_url()}/_bulk"
       end
 
-    result = Http.post(url, actions, headers)
+    result = http_post(url, actions, headers)
 
-    case parse_http_response(result) do
+    case result do
       {:ok, 200, body} -> {:ok, Jason.decode!(body)}
       {:ok, sc} -> {:error, sc}
       {:error, reason} -> {:error, reason}
@@ -265,8 +267,8 @@ defmodule ElasticClient.HTTP do
   def do_alias_actions(actions) when is_binary(actions) do
     headers = [{"content-type", "application/x-ndjson"}]
     url ="#{host_url()}/_aliases"
-    result = Http.post(url, actions, headers)
-    case parse_http_response(result) do
+    result = http_post(url, actions, headers)
+    case result do
       {:ok, 200, body} -> {:ok, Jason.decode!(body)}
       {:ok, sc} -> {:error, sc}
       {:error, reason} -> {:error, reason}
@@ -339,7 +341,11 @@ defmodule ElasticClient.HTTP do
   def url_for(index_name, type, id), do: "#{url_for(index_name, type)}/#{id}"
 
   defp http_get(url), do: Http.get(url, headers()) |> parse_http_response()
-  defp http_post(url, req), do: Http.post(url, req, headers()) |> parse_http_response()
+  defp http_post(url, req), do: http_post(url, req, headers())
+  defp http_post(url, req, headers) do
+    Http.post(url, req, headers, [recv_timeout: @recv_timeout]) 
+    |> parse_http_response()
+  end
   defp http_put(url, req), do: Http.put(url, req, headers()) |> parse_http_response()
   defp http_head(url), do: Http.head(url, headers()) |> parse_http_response()
   defp http_delete(url), do: Http.delete(url, headers()) |> parse_http_response()
