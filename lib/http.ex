@@ -66,9 +66,9 @@ defmodule ElasticClient.HTTP do
     base =
       case opts[:id] do
         nil ->
-          %{index: %{_index: index(opts[:index_name]),_type: opts[:doc_type]}}
+          %{index: %{_index: index(opts[:index_name])}}
         new_id ->
-          %{index: %{_id: new_id, _index: index(opts[:index_name]),_type: opts[:doc_type]}}
+          %{index: %{_id: new_id, _index: index(opts[:index_name])}}
       end
     [base, doc]
   end
@@ -86,7 +86,6 @@ defmodule ElasticClient.HTTP do
     base = %{
       update: %{
         _index: index(opts[:index_name]),
-        _type: opts[:doc_type],
         _id: opts[:id]
       }
     }
@@ -107,7 +106,6 @@ defmodule ElasticClient.HTTP do
       %{
         delete: %{
           _index: index(opts[:index_name]),
-          _type: opts[:doc_type],
           _id: id
         }
       }
@@ -158,7 +156,7 @@ defmodule ElasticClient.HTTP do
   """
   @spec index_document(String.t(), String.t(), String.t()) :: {:ok, any()} | {:error, any()}
   def index_document(index_name, document, type) do
-    case http_post(url_for(index_name, type), document) do
+    case http_post(url_for(index_name, "_doc"), document) do
       {:ok, 200, body} ->
         {:ok, body |> Jason.decode!()}
 
@@ -180,7 +178,7 @@ defmodule ElasticClient.HTTP do
   """
   @spec search(atom(), String.t(), String.t(), map()) :: map()
   def search(:get, index_name, type, query) when is_binary(type) and is_map(query) do
-    url = url_for(index_name, type) <> "/_search?" <> URI.encode_query(query)
+    url = url_for(index_name, "") <> "/_search?" <> URI.encode_query(query)
 
     case http_get(url) do
       {:ok, 200, body} ->
@@ -203,7 +201,7 @@ defmodule ElasticClient.HTTP do
   query - a map with key/value search params
   """
   def search(:post, index_name, type, query) when is_binary(type) do
-    url = url_for(index_name, type) <> "/_search"
+    url = url_for(index_name, "") <> "/_search"
 
     case http_post(url, query |> Jason.encode!()) do
       {:ok, 200, body} ->
@@ -218,7 +216,7 @@ defmodule ElasticClient.HTTP do
   end
 
   def delete(index_name, type, id) do
-    case http_delete("#{url_for(index_name, type)}/#{id}") do
+    case http_delete("#{url_for(index_name, "_doc")}/#{id}") do
       {:ok, 200, body} ->
         {:ok, body |> Jason.decode!()}
 
@@ -265,7 +263,6 @@ defmodule ElasticClient.HTTP do
   end
 
   def do_alias_actions(actions) when is_binary(actions) do
-    headers = [{"content-type", "application/x-ndjson"}]
     url ="#{host_url()}/_aliases"
     result = http_post(url, actions, headers)
     case result do
@@ -281,7 +278,7 @@ defmodule ElasticClient.HTTP do
         true -> "refresh"
         _ -> ""
       end
-    url = "#{url_for(index_name, type)}/_delete_by_query?#{tail}"
+    url = "#{url_for(index_name, "")}/_delete_by_query?#{tail}"
     case http_post(url, q |> Jason.encode!()) do
       {:ok, 200, body} -> {:ok, Jason.decode!(body)}
       {:ok, sc} -> {:error, sc}
